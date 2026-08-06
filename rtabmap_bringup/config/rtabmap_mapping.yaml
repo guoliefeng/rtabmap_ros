@@ -1,0 +1,43 @@
+# ROS/private RTAB-Map parameters for scan-cloud-only 3D mapping.
+subscribe_depth: false
+subscribe_rgb: false
+subscribe_rgbd: false
+subscribe_stereo: false
+subscribe_scan: false
+subscribe_scan_cloud: true
+subscribe_scan_descriptor: false
+subscribe_odom_info: true
+
+frame_id: base_link
+map_frame_id: map
+odom_frame_id: ""
+publish_tf: true
+
+approx_sync: false
+topic_queue_size: 10
+sync_queue_size: 100
+wait_for_transform_duration: 0.2
+
+Mem/IncrementalMemory: true
+Mem/InitWMWithAllNodes: false
+Mem/BinDataKept: true
+Mem/ReduceGraph: false
+
+Reg/Strategy: 1
+Reg/Force3DoF: false
+
+Rtabmap/DetectionRate: 2.0
+Rtabmap/TimeThr: 0
+Rtabmap/MemoryThr: 0
+
+RGBD/LinearUpdate: 0.50
+RGBD/AngularUpdate: 0.087266
+RGBD/ProximityBySpace: true
+RGBD/ProximityByTime: false
+RGBD/ProximityPathMaxNeighbors: 1
+RGBD/OptimizeFromGraphEnd: false
+
+Grid/Sensor: 0
+Grid/RangeMin: 2.0
+Grid/RangeMax: 100.0
+Grid/CellSize: 0.20

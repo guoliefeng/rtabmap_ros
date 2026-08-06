@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>rtabmap_bringup</name>
+  <version>0.1.0</version>
+  <description>Yangpu LiDAR and IMU RTAB-Map mapping bringup for ROS Noetic.</description>
+
+  <maintainer email="glf@example.com">glf</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf</depend>
+  <depend>tf2_ros</depend>
+  <depend>rtabmap_odom</depend>
+  <depend>rtabmap_slam</depend>
+  <depend>rtabmap_viz</depend>
+  <depend>rtabmap_util</depend>
+  <depend>rtabmap_msgs</depend>
+  <depend>rviz</depend>
+</package>

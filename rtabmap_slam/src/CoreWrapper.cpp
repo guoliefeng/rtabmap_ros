@@ -2136,8 +2136,8 @@ void CoreWrapper::process(
 				if(rtabmap_.getMemory() == 0 ||
 					filteredPoses.size() == 0 ||
 					rtabmap_.getMemory()->getLastSignatureId() != filteredPoses.rbegin()->first ||
-					rtabmap_.getMemory()->getLastWorkingSignature() == 0 ||
-					rtabmap_.getMemory()->getLastWorkingSignature()->sensorData().gridCellSize() == 0 ||
+					rtabmap_.getMemory()->getLastWorkingSignature(true) == 0 ||
+					rtabmap_.getMemory()->getLastWorkingSignature(true)->sensorData().gridCellSize() == 0 ||
 					(!mapsManager_.getLocalMapMaker()->isGridFromDepth() && data.laserScanRaw().is2d())) // 2d laser scan would fill empty space for latest data
 				{
 					SensorData tmpData = data;
@@ -3326,9 +3326,9 @@ bool CoreWrapper::getNodeDataCallback(rtabmap_msgs::GetNodeData::Request& req, r
 			req.grid?"true":"false",
 			req.user_data?"true":"false");
 
-	if(req.ids.empty() && rtabmap_.getMemory() && rtabmap_.getMemory()->getLastWorkingSignature())
+	if(req.ids.empty() && rtabmap_.getMemory() && rtabmap_.getMemory()->getLastWorkingSignature(true))
 	{
-		req.ids.push_back(rtabmap_.getMemory()->getLastWorkingSignature()->id());
+		req.ids.push_back(rtabmap_.getMemory()->getLastWorkingSignature(true)->id());
 	}
 	for(size_t i=0; i<req.ids.size(); ++i)
 	{

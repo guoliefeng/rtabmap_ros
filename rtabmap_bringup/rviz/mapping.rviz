@@ -1,0 +1,110 @@
+Panels:
+  - Class: rviz/Displays
+    Help Height: 78
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /TF1
+        - /Input Cloud1
+        - /Filtered Cloud1
+        - /Map Cloud1
+        - /Map Path1
+      Splitter Ratio: 0.5
+    Tree Height: 650
+  - Class: rviz/Views
+    Name: Views
+  - Class: rviz/Time
+    Name: Time
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds: true
+      Color Transformer: Intensity
+      Enabled: true
+      Name: Input Cloud
+      Position Transformer: XYZ
+      Queue Size: 2
+      Selectable: true
+      Size (Pixels): 2
+      Style: Points
+      Topic: /lidar_preprocessor/meta_cloud
+      Use Fixed Frame: true
+      Class: rviz/PointCloud2
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds: true
+      Color Transformer: Intensity
+      Enabled: true
+      Name: Filtered Cloud
+      Position Transformer: XYZ
+      Queue Size: 2
+      Selectable: true
+      Size (Pixels): 2
+      Style: Points
+      Topic: /rtabmap/odom_filtered_input_scan
+      Use Fixed Frame: true
+      Class: rviz/PointCloud2
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds: true
+      Color Transformer: FlatColor
+      Enabled: true
+      Name: Map Cloud
+      Position Transformer: XYZ
+      Queue Size: 1
+      Selectable: true
+      Size (Pixels): 2
+      Style: Points
+      Topic: /rtabmap/cloud_map
+      Use Fixed Frame: true
+      Class: rviz/PointCloud2
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 25; 255; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.03
+      Name: Map Path
+      Topic: /rtabmap/mapPath
+      Unreliable: false
+    - Alpha: 1
+      Class: rviz/TF
+      Enabled: true
+      Frame Timeout: 15
+      Marker Scale: 0.5
+      Name: TF
+      Show Axes: true
+      Show Names: false
+      Update Interval: 0
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Default Light: true
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 30
+      Focal Point: 0; 0; 0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Invert Z Axis: false
+      Name: Current View
+      Pitch: 0.7
+      Target Frame: map
+      Yaw: 0.7
+Window Geometry:
+  Height: 900
+  Width: 1400
+  X: 50
+  Y: 50
