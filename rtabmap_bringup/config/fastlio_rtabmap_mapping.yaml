@@ -1,0 +1,52 @@
+# Mode B RTAB-Map backend: external FAST-LIO odometry plus a FAST-LIO body-frame cloud.
+# No rtabmap_odom/icp_odometry and no RTAB-Map IMU remap are used in this baseline.
+subscribe_depth: false
+subscribe_rgb: false
+subscribe_rgbd: false
+subscribe_stereo: false
+subscribe_scan: false
+subscribe_scan_cloud: true
+subscribe_scan_descriptor: false
+subscribe_odom: true
+subscribe_odom_info: false
+
+publish_tf: true
+approx_sync: false
+topic_queue_size: 30
+sync_queue_size: 100
+wait_for_transform_duration: 0.2
+
+Mem/IncrementalMemory: true
+Mem/InitWMWithAllNodes: false
+Mem/BinDataKept: true
+Mem/ReduceGraph: false
+
+Reg/Strategy: 1
+Reg/Force3DoF: false
+
+Rtabmap/DetectionRate: 2.0
+Rtabmap/TimeThr: 0
+Rtabmap/MemoryThr: 0
+
+RGBD/LinearUpdate: 0.50
+RGBD/AngularUpdate: 0.087266
+RGBD/ProximityBySpace: true
+RGBD/ProximityByTime: false
+RGBD/ProximityPathMaxNeighbors: 1
+RGBD/OptimizeFromGraphEnd: false
+
+Grid/Sensor: 0
+Grid/RangeMin: 2.0
+Grid/RangeMax: 100.0
+Grid/CellSize: 0.20
+
+# These values are for RTAB-Map's geometric registration of graph constraints,
+# not for odometry. FAST-LIO remains the sole odometry estimator.
+Icp/PointToPlane: true
+# Non-zero radius is required to estimate local normals from this cloud for
+# point-to-plane graph registration. This is not a FAST-LIO odometry setting.
+Icp/PointToPlaneRadius: 0.50
+Icp/Iterations: 30
+Icp/MaxCorrespondenceDistance: 2.0
+Icp/CorrespondenceRatio: 0.10
+Icp/VoxelSize: 0.0

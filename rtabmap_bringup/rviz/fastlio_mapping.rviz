@@ -1,0 +1,60 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+  - Class: rviz/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 1
+      Class: rviz/PointCloud2
+      Color Transformer: Intensity
+      Enabled: true
+      Name: FAST-LIO local body cloud
+      Queue Size: 2
+      Size (Pixels): 2
+      Style: Points
+      Topic: /fast_lio_ns/cloud_registered_body
+    - Alpha: 1
+      Class: rviz/PointCloud2
+      Color Transformer: FlatColor
+      Enabled: true
+      Name: RTAB-Map cloud
+      Queue Size: 1
+      Size (Pixels): 2
+      Style: Points
+      Topic: /rtabmap/cloud_map
+    - Class: rviz/Path
+      Color: 25; 255; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.03
+      Name: RTAB-Map optimized path
+      Topic: /rtabmap/mapPath
+    - Class: rviz/Path
+      Color: 255; 160; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.03
+      Name: FAST-LIO path
+      Topic: /fast_lio_ns/path
+    - Class: rviz/TF
+      Enabled: true
+      Frame Timeout: 15
+      Marker Scale: 0.5
+      Name: TF
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: rtabmap_map
+    Frame Rate: 30
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 30
+      Focal Point: 0; 0; 0
+      Pitch: 0.7
+      Target Frame: rtabmap_map
+      Yaw: 0.7
+Window Geometry:
+  Height: 900
+  Width: 1400

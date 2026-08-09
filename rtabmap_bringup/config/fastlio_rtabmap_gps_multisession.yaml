@@ -1,0 +1,67 @@
+# Mode B + GNSS multi-session backend. Append to a GPS-prior database.
+subscribe_depth: false
+subscribe_rgb: false
+subscribe_rgbd: false
+subscribe_stereo: false
+subscribe_scan: false
+subscribe_scan_cloud: true
+subscribe_scan_descriptor: false
+subscribe_odom: true
+subscribe_odom_info: false
+
+publish_tf: true
+approx_sync: false
+topic_queue_size: 30
+sync_queue_size: 100
+wait_for_transform_duration: 0.2
+
+Mem/IncrementalMemory: true
+Mem/InitWMWithAllNodes: true
+Mem/BinDataKept: true
+Mem/ReduceGraph: false
+# Do not merge a current-session signature into an old session loaded in WM.
+# Besides retaining every candidate for inter-session ICP, this avoids the
+# RTAB-Map 0.23.9 rehearsal-merge crash observed on the A208 -> A205 run.
+Mem/RehearsalSimilarity: 1.0
+
+Reg/Strategy: 1
+Reg/Force3DoF: false
+
+Optimizer/Strategy: 2
+Optimizer/PriorsIgnored: false
+Optimizer/VarianceIgnored: false
+Optimizer/Iterations: 30
+Optimizer/GravitySigma: 0.3
+
+Rtabmap/DetectionRate: 2.0
+Rtabmap/TimeThr: 0
+Rtabmap/MemoryThr: 0
+
+RGBD/LinearUpdate: 0.50
+RGBD/AngularUpdate: 0.087266
+RGBD/LocalRadius: 15.0
+RGBD/ProximityBySpace: true
+RGBD/ProximityByTime: false
+RGBD/ProximityMaxGraphDepth: 0
+RGBD/ProximityMaxPaths: 5
+RGBD/ProximityPathMaxNeighbors: 10
+RGBD/ProximityPathFilteringRadius: 2.0
+# A restarted map is disconnected until the first inter-session constraint is
+# accepted. Use the stored raw path for candidate retrieval; GPS PosePrior
+# links still constrain the graph optimization after candidates are accepted.
+RGBD/ProximityPathRawPosesUsed: true
+RGBD/ProximityAngle: 60.0
+RGBD/OptimizeFromGraphEnd: false
+
+Grid/Sensor: 0
+Grid/RangeMin: 2.0
+Grid/RangeMax: 100.0
+Grid/CellSize: 0.20
+
+Icp/PointToPlane: false
+Icp/Iterations: 50
+Icp/MaxCorrespondenceDistance: 2.0
+Icp/CorrespondenceRatio: 0.10
+Icp/MaxTranslation: 1.5
+Icp/MaxRotation: 0.785398
+Icp/VoxelSize: 0.30

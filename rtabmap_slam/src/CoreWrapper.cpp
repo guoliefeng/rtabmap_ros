@@ -100,6 +100,7 @@ CoreWrapper::CoreWrapper() :
 		configPath_(""),
 		odomDefaultAngVariance_(0.001),
 		odomDefaultLinVariance_(0.001),
+		odomPoseFromMessage_(false),
 		landmarkDefaultAngVariance_(0.001),
 		landmarkDefaultLinVariance_(0.001),
 		waitForTransform_(true),
@@ -119,6 +120,9 @@ CoreWrapper::CoreWrapper() :
 		mapToOdom_(rtabmap::Transform::getIdentity()),
 		transformThread_(0),
 		tfThreadRunning_(false),
+		globalPoseTimeTolerance_(0.0),
+		globalPoseQueueSize_(100),
+		globalPoseBufferSize_(5000),
 		stereoToDepth_(false),
 		interOdomSync_(0),
 		odomSensorSync_(false),
@@ -134,7 +138,10 @@ CoreWrapper::CoreWrapper() :
 	char * rosHomePath = getenv("ROS_HOME");
 	std::string workingDir = rosHomePath?rosHomePath:UDirectory::homeDir()+"/.ros";
 	databasePath_ = workingDir+"/"+rtabmap::Parameters::getDefaultDatabaseName();
+	globalPoseMutex_.lock();
 	globalPose_.header.stamp = ros::Time(0);
+	globalPoses_.clear();
+	globalPoseMutex_.unlock();
 }
 
 void CoreWrapper::onInit()
@@ -159,6 +166,20 @@ void CoreWrapper::onInit()
 	pnh.param("map_frame_id",        mapFrameId_, mapFrameId_);
 	pnh.param("ground_truth_frame_id", groundTruthFrameId_, groundTruthFrameId_);
 	pnh.param("ground_truth_base_frame_id", groundTruthBaseFrameId_, frameId_);
+	pnh.param("global_pose_time_tolerance", globalPoseTimeTolerance_, globalPoseTimeTolerance_);
+	pnh.param("global_pose_queue_size", globalPoseQueueSize_, globalPoseQueueSize_);
+	pnh.param("global_pose_buffer_size", globalPoseBufferSize_, globalPoseBufferSize_);
+	if(globalPoseTimeTolerance_ < 0.0)
+	{
+		NODELET_WARN("global_pose_time_tolerance cannot be negative, setting it to 0");
+		globalPoseTimeTolerance_ = 0.0;
+	}
+	if(globalPoseQueueSize_ < 1 || globalPoseBufferSize_ < 1)
+	{
+		NODELET_WARN("global_pose_queue_size and global_pose_buffer_size must be positive, setting them to 100 and 5000");
+		globalPoseQueueSize_ = 100;
+		globalPoseBufferSize_ = 5000;
+	}
 	if(pnh.hasParam("depth_cameras") && !pnh.hasParam("depth_cameras"))
 	{
 		NODELET_ERROR("\"depth_cameras\" parameter doesn't exist "
@@ -192,6 +213,7 @@ void CoreWrapper::onInit()
 	pnh.param("tf_tolerance",        tfTolerance, tfTolerance);
 	pnh.param("odom_tf_angular_variance", odomDefaultAngVariance_, odomDefaultAngVariance_);
 	pnh.param("odom_tf_linear_variance", odomDefaultLinVariance_, odomDefaultLinVariance_);
+	pnh.param("odom_pose_from_message", odomPoseFromMessage_, odomPoseFromMessage_);
 	pnh.param("landmark_angular_variance", landmarkDefaultAngVariance_, landmarkDefaultAngVariance_);
 	pnh.param("landmark_linear_variance", landmarkDefaultLinVariance_, landmarkDefaultLinVariance_);
 	pnh.param("pub_loc_pose_only_when_localizing", pubLocPoseOnlyWhenLocalizing_,pubLocPoseOnlyWhenLocalizing_);
@@ -853,7 +875,7 @@ void CoreWrapper::onInit()
 	}
 
 	userDataAsyncSub_ = nh.subscribe("user_data_async", 1, &CoreWrapper::userDataAsyncCallback, this);
-	globalPoseAsyncSub_ = nh.subscribe("global_pose", 1, &CoreWrapper::globalPoseAsyncCallback, this);
+	globalPoseAsyncSub_ = nh.subscribe("global_pose", globalPoseTimeTolerance_>0.0?globalPoseQueueSize_:1, &CoreWrapper::globalPoseAsyncCallback, this);
 	gpsFixAsyncSub_ = nh.subscribe("gps/fix", 1, &CoreWrapper::gpsFixAsyncCallback, this);
 #ifdef WITH_APRILTAG_ROS
 	tagDetectionsSub_ = nh.subscribe("tag_detections", 1, &CoreWrapper::tagDetectionsAsyncCallback, this);
@@ -1027,10 +1049,10 @@ bool CoreWrapper::odomUpdate(const nav_msgs::OdometryConstPtr & odomMsg, ros::Ti
 		if(!odom.isNull())
 		{
 			Transform odomTF;
-			if(!stamp.isZero()) {
+			if(!odomPoseFromMessage_ && !stamp.isZero()) {
 				odomTF = rtabmap_conversions::getTransform(odomMsg->header.frame_id, frameId_, stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0.0);
 			}
-			if(odomTF.isNull())
+			if(!odomPoseFromMessage_ && odomTF.isNull())
 			{
 				static bool shown = false;
 				if(!shown)
@@ -1043,7 +1065,7 @@ bool CoreWrapper::odomUpdate(const nav_msgs::OdometryConstPtr & odomMsg, ros::Ti
 				}
 				stamp = odomMsg->header.stamp;
 			}
-			else
+			else if(!odomPoseFromMessage_)
 			{
 				odom = odomTF;
 			}
@@ -1922,44 +1944,83 @@ void CoreWrapper::process(
 		}
 		data.setGroundTruth(groundTruthPose);
 
-		//global pose
-		if(!globalPose_.header.stamp.isZero())
+		// global pose. When a time tolerance is configured, select the pose nearest
+		// to the synchronized sensor stamp. This avoids using a future asynchronous
+		// pose when sensor processing is behind a high-rate global-pose stream.
+		geometry_msgs::PoseWithCovarianceStamped globalPoseMsg;
+		bool globalPoseTimeSynchronized = false;
+		{
+			UScopeMutex lock(globalPoseMutex_);
+			if(globalPoseTimeTolerance_ > 0.0)
+			{
+				std::map<double, geometry_msgs::PoseWithCovarianceStamped>::const_iterator selected = globalPoses_.end();
+				std::map<double, geometry_msgs::PoseWithCovarianceStamped>::const_iterator upper = globalPoses_.lower_bound(lastPoseStamp_.toSec());
+				if(upper != globalPoses_.end())
+				{
+					selected = upper;
+				}
+				if(upper != globalPoses_.begin())
+				{
+					std::map<double, geometry_msgs::PoseWithCovarianceStamped>::const_iterator lower = upper;
+					--lower;
+					if(selected == globalPoses_.end() ||
+					   fabs(lower->first-lastPoseStamp_.toSec()) < fabs(selected->first-lastPoseStamp_.toSec()))
+					{
+						selected = lower;
+					}
+				}
+				if(selected != globalPoses_.end() &&
+				   fabs(selected->first-lastPoseStamp_.toSec()) <= globalPoseTimeTolerance_)
+				{
+					globalPoseMsg = selected->second;
+					globalPoseTimeSynchronized = true;
+				}
+			}
+			else
+			{
+				globalPoseMsg = globalPose_;
+				globalPose_.header.stamp = ros::Time(0);
+			}
+		}
+		if(!globalPoseMsg.header.stamp.isZero())
 		{
 			// assume sensor is fixed
 			Transform sensorToBase = rtabmap_conversions::getTransform(
-					globalPose_.header.frame_id,
+					globalPoseMsg.header.frame_id,
 					frameId_,
 					lastPoseStamp_,
 					tfListener_,
 					waitForTransform_?waitForTransformDuration_:0.0);
 			if(!sensorToBase.isNull())
 			{
-				Transform globalPose = rtabmap_conversions::transformFromPoseMsg(globalPose_.pose.pose);
+				Transform globalPose = rtabmap_conversions::transformFromPoseMsg(globalPoseMsg.pose.pose);
 				globalPose *= sensorToBase; // transform global pose from sensor frame to robot base frame
 
 				// Correction of the global pose accounting the odometry movement since we received it
-				Transform correction = rtabmap_conversions::getMovingTransform(
-						frameId_,
-						odomFrameId,
-						lastPoseStamp_,
-						globalPose_.header.stamp,
-						tfListener_,
-						waitForTransform_?waitForTransformDuration_:0.0);
-				if(!correction.isNull())
+				if(!globalPoseTimeSynchronized)
 				{
-					globalPose *= correction;
+					Transform correction = rtabmap_conversions::getMovingTransform(
+							frameId_,
+							odomFrameId,
+							lastPoseStamp_,
+							globalPoseMsg.header.stamp,
+							tfListener_,
+							waitForTransform_?waitForTransformDuration_:0.0);
+					if(!correction.isNull())
+					{
+						globalPose *= correction;
+					}
+					else
+					{
+						NODELET_WARN("Could not adjust global pose accordingly to latest odometry pose. "
+								"If odometry is small since it received the global pose and "
+								"covariance is large, this should not be a problem.");
+					}
 				}
-				else
-				{
-					NODELET_WARN("Could not adjust global pose accordingly to latest odometry pose. "
-							"If odometry is small since it received the global pose and "
-							"covariance is large, this should not be a problem.");
-				}
-				cv::Mat globalPoseCovariance = cv::Mat(6,6, CV_64FC1, (void*)globalPose_.pose.covariance.data()).clone();
+				cv::Mat globalPoseCovariance = cv::Mat(6,6, CV_64FC1, (void*)globalPoseMsg.pose.covariance.data()).clone();
 				data.setGlobalPose(globalPose, globalPoseCovariance);
 			}
 		}
-		globalPose_.header.stamp = ros::Time(0);
 
 		if(gps_.stamp() > 0.0)
 		{
@@ -2369,7 +2430,19 @@ void CoreWrapper::globalPoseAsyncCallback(const geometry_msgs::PoseWithCovarianc
 {
 	if(!paused_)
 	{
-		globalPose_ = *globalPoseMsg;
+		UScopeMutex lock(globalPoseMutex_);
+		if(globalPoseTimeTolerance_ > 0.0 && !globalPoseMsg->header.stamp.isZero())
+		{
+			globalPoses_.insert(std::make_pair(globalPoseMsg->header.stamp.toSec(), *globalPoseMsg));
+			while(globalPoses_.size() > static_cast<size_t>(globalPoseBufferSize_))
+			{
+				globalPoses_.erase(globalPoses_.begin());
+			}
+		}
+		else
+		{
+			globalPose_ = *globalPoseMsg;
+		}
 	}
 }
 
@@ -2837,7 +2910,10 @@ bool CoreWrapper::resetRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empt
 	graphLatched_ = false;
 	mapsManager_.clear();
 	previousStamp_ = ros::Time(0);
+	globalPoseMutex_.lock();
 	globalPose_.header.stamp = ros::Time(0);
+	globalPoses_.clear();
+	globalPoseMutex_.unlock();
 	gps_ = rtabmap::GPS();
 	tags_.clear();
 	userDataMutex_.lock();
@@ -2926,7 +3002,10 @@ bool CoreWrapper::loadDatabaseCallback(rtabmap_msgs::LoadDatabase::Request& req,
 	graphLatched_ = false;
 	mapsManager_.clear();
 	previousStamp_ = ros::Time(0);
+	globalPoseMutex_.lock();
 	globalPose_.header.stamp = ros::Time(0);
+	globalPoses_.clear();
+	globalPoseMutex_.unlock();
 	gps_ = rtabmap::GPS();
 	tags_.clear();
 	userDataMutex_.lock();
@@ -3052,7 +3131,10 @@ bool CoreWrapper::backupDatabaseCallback(std_srvs::Empty::Request&, std_srvs::Em
 	userDataMutex_.lock();
 	userData_ = cv::Mat();
 	userDataMutex_.unlock();
+	globalPoseMutex_.lock();
 	globalPose_.header.stamp = ros::Time(0);
+	globalPoses_.clear();
+	globalPoseMutex_.unlock();
 	gps_ = rtabmap::GPS();
 	tags_.clear();
 

@@ -1,0 +1,69 @@
+# Mode B multi-session backend. FAST-LIO remains the only odometry front end.
+# This configuration is intended for appending to an existing rtabmap.db.
+subscribe_depth: false
+subscribe_rgb: false
+subscribe_rgbd: false
+subscribe_stereo: false
+subscribe_scan: false
+subscribe_scan_cloud: true
+subscribe_scan_descriptor: false
+subscribe_odom: true
+subscribe_odom_info: false
+
+publish_tf: true
+approx_sync: false
+topic_queue_size: 30
+sync_queue_size: 100
+wait_for_transform_duration: 0.2
+
+Mem/IncrementalMemory: true
+# Pure LiDAR mode has no visual bag-of-words retrieval. Keep the old scans in
+# working memory so proximity ICP can compare the new session with map_id=0.
+Mem/InitWMWithAllNodes: true
+Mem/BinDataKept: true
+Mem/ReduceGraph: false
+# Preserve all current-session signatures during a resumed mapping run. This
+# prevents rehearsal from merging a new signature with a loaded historical one.
+Mem/RehearsalSimilarity: 1.0
+
+Reg/Strategy: 1
+Reg/Force3DoF: false
+
+Rtabmap/DetectionRate: 2.0
+Rtabmap/TimeThr: 0
+Rtabmap/MemoryThr: 0
+
+RGBD/LinearUpdate: 0.50
+RGBD/AngularUpdate: 0.087266
+RGBD/LocalRadius: 15.0
+RGBD/ProximityBySpace: true
+RGBD/ProximityByTime: false
+# A restarted session is disconnected until its first closure. A non-zero
+# graph-depth limit would therefore exclude all nodes in the previous map.
+RGBD/ProximityMaxGraphDepth: 0
+RGBD/ProximityMaxPaths: 5
+RGBD/ProximityPathMaxNeighbors: 10
+RGBD/ProximityPathFilteringRadius: 2.0
+RGBD/ProximityAngle: 60.0
+RGBD/OptimizeFromGraphEnd: false
+
+Grid/Sensor: 0
+Grid/RangeMin: 2.0
+Grid/RangeMax: 100.0
+Grid/CellSize: 0.20
+
+# Point-to-point was more stable for this dataset than repeatedly falling back
+# from point-to-plane because of low structural complexity.
+Icp/PointToPlane: false
+Icp/Iterations: 50
+Icp/MaxCorrespondenceDistance: 2.0
+# RTAB-Map doubles this value for computeIcpTransformMulti(). The effective
+# multi-scan threshold is therefore 0.20; the verified candidate has 0.234.
+Icp/CorrespondenceRatio: 0.10
+# The first verified inter-session candidate needs a 1.097 m correction. Keep
+# this below the second rejected candidate (2.154 m) to avoid over-relaxing ICP.
+Icp/MaxTranslation: 1.5
+Icp/MaxRotation: 0.785398
+# Downsample only the graph-registration copy of each scan. FAST-LIO odometry
+# and the scan stored in the database remain unchanged.
+Icp/VoxelSize: 0.30

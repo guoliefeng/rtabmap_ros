@@ -9,7 +9,10 @@ This package is the first-stage mapping configuration for the Yangpu port bags. 
                                -> map -> odom_rtabmap, mapData, cloud_map, rtabmap.db
 ```
 
-The system is **IMU-assisted ICP odometry plus an RTAB-Map pose graph**. It is not a FAST-LIO-style tightly coupled LIO implementation. No GPS, `/localization/ins`, `global_pose`, custom loop detector, Scan Context, external graph optimizer, or RTAB-Map core changes are included.
+The default `lidar_imu_mapping.launch` path is **IMU-assisted ICP odometry plus
+an RTAB-Map pose graph**. It is not a FAST-LIO-style tightly coupled LIO
+implementation and it does not enable GPS by default. This package also
+contains the optional Mode B FAST-LIO + RTAB-Map + GNSS path documented below.
 
 ## Verified bag interface
 
@@ -161,6 +164,170 @@ max_update_rate:=5.0
 
 If CPU is high, disable both GUI options first, then increase `scan_voxel_size` or lower `rtabmap_detection_rate`. If ICP is unstable, verify that `meta_cloud` is a single-frame cloud rather than an accumulated global cloud before changing more parameters.
 
-## Deferred GPS/INS stage
+## GPS/INS input note
 
-`/localization/ins` is intentionally not remapped to `/rtabmap/gps/fix`; it is `nav_msgs/Odometry`, not `sensor_msgs/NavSatFix`. A later stage should convert it to `geometry_msgs/PoseWithCovarianceStamped` only after deciding the ENU/map convention, whether the pose is for `base_link` or `ins`, covariance handling, state gating, separate XY/Z thresholds, and a non-overconstraining update policy.
+`/localization/ins` must not be remapped to `/rtabmap/gps/fix`: it is
+`nav_msgs/Odometry`, not `sensor_msgs/NavSatFix`, and the bag version has zero
+covariance. The verified GPS path starts `gnss_poser`, consumes its
+`/localization/gnss_odom`, validates/floors the covariance, and publishes
+`geometry_msgs/PoseWithCovarianceStamped` on `/rtabmap/global_pose`. The adapter
+can also accept `/localization/ins` directly with conservative fallback
+covariance, but that is not the default tested path.
+
+## Mode B: FAST-LIO frontend + RTAB-Map backend
+
+Mode B keeps FAST-LIO as the only odometry estimator and uses RTAB-Map only for pose-graph/map construction. The measured interface and frame rationale are in [`../docs/fastlio_interface_report.md`](../docs/fastlio_interface_report.md).
+
+```text
+/fast_lio_ns/loc_result                -> RTAB-Map external odometry
+/fast_lio_ns/cloud_registered_body     -> RTAB-Map local scan cloud
+rtabmap_map -> map -> base_link_fast_lio
+```
+
+Do not start `rtabmap_odom/icp_odometry` for this mode, and do not remap `/ins_driver/imu` into RTAB-Map. The frontend helper below starts only `fastlio_mapping`, not the existing `mapping_hainan.launch` auxiliary GPS/localization nodes.
+
+Start a ROS master, then use three terminals.
+
+Terminal 1, FAST-LIO frontend:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source $HOME/dataDisk/Study/rtabMap_ws/install_isolated/setup.bash
+export CMAKE_PREFIX_PATH=$HOME/dataDisk/Study/rtabMap_ws/install_isolated:$CMAKE_PREFIX_PATH
+rosrun rtabmap_bringup run_fastlio_frontend_mode_b.sh
+```
+
+Terminal 2, RTAB-Map backend (the directory must exist and be writable):
+
+```bash
+source /opt/ros/noetic/setup.bash
+source $HOME/dataDisk/Study/rtabMap_ws/install_isolated/setup.bash
+source $HOME/proj/FAST_LIO_ws/devel/setup.bash
+export ROS_PACKAGE_PATH=$HOME/dataDisk/Study/rtabMap_ws/install_isolated/share:$HOME/opt/ros-deps/opt/ros/noetic/share:$ROS_PACKAGE_PATH
+export CMAKE_PREFIX_PATH=$HOME/dataDisk/Study/rtabMap_ws/install_isolated:$CMAKE_PREFIX_PATH
+export LD_LIBRARY_PATH=$HOME/opt/rtabmap-noetic/lib:$HOME/dataDisk/Study/rtabMap_ws/install_isolated/lib:$HOME/opt/ros-deps/opt/ros/noetic/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export PYTHONPATH=$HOME/dataDisk/Study/rtabMap_ws/install_isolated/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
+
+MODE_B_OUT=$HOME/dataDisk/hainan/yangpu/qc/rtabmap_fastlio_output
+mkdir -p "$MODE_B_OUT"
+roslaunch rtabmap_bringup fastlio_rtabmap_mapping.launch \
+  use_sim_time:=true output_dir:="$MODE_B_OUT" delete_db_on_start:=false rviz:=false
+```
+
+Terminal 3, short validation then the requested full replay:
+
+```bash
+cd $HOME/dataDisk/hainan/yangpu/qc
+rosbag play 2026-06-22-12-* --clock -u 30
+# Stop the two nodes cleanly, choose a new output directory, then:
+rosbag play 2026-06-22-12-* --clock -u 515
+```
+
+During the replay, run `rosrun rtabmap_bringup check_fastlio_rtabmap_runtime.sh`. After the nodes exit, analyze the database and compare the sampled FAST-LIO trajectory:
+
+```bash
+rosrun rtabmap_bringup analyze_rtabmap_db.py \
+  "$MODE_B_OUT/rtabmap.db" --output-dir "$MODE_B_OUT/analysis" \
+  --fastlio-trajectory "$MODE_B_OUT/fastlio_odom.csv"
+```
+
+`fastlio_rtabmap_mapping.launch` uses exact odometry/cloud synchronization (`approx_sync=false`); this was measured as a 0 ms maximum header-stamp difference across 296 pairs. `Icp/PointToPlaneRadius=0.50` belongs to RTAB-Map's pose-graph registration only, not FAST-LIO odometry.
+
+For a fully isolated, headless replay (especially useful for the 515 s run), launch the orchestrator in a separate session so that it survives terminal/session changes:
+
+```bash
+MODE_B_RUN=$HOME/dataDisk/hainan/yangpu/qc/rtabmap_fastlio_515_run
+mkdir -p "$MODE_B_RUN"
+setsid nohup bash $HOME/dataDisk/Study/rtabMap_ws/install_isolated/lib/rtabmap_bringup/run_fastlio_rtabmap_bag_test.sh \
+  --output "$MODE_B_RUN/output" --duration 515 --port 11337 \
+  > "$MODE_B_RUN/console.log" 2>&1 < /dev/null &
+```
+
+It writes `mode_b_run_status.txt`, `sync.json`, runtime checkpoints, logs, the database, and `analysis/db_report.txt` in `MODE_B_RUN`. The output path must be new; the script refuses to overwrite an existing `rtabmap.db`.
+
+The completed Yangpu 30 s and 515 s evidence, database statistics, TF/synchronization measurements and caveats are recorded in [`../docs/mode_b_yangpu_test_report.md`](../docs/mode_b_yangpu_test_report.md).
+
+### Mode B multi-session continuation
+
+To append the segment beginning at `rosbag play ... -s 555` to a copy of the
+515-second database, use the multi-session helper. It never modifies the seed
+database in place and refuses to overwrite an existing destination database.
+
+```bash
+SEED_DB=$HOME/dataDisk/hainan/yangpu/qc/rtabmap_fastlio_515_final_okW4v1/output/rtabmap.db
+MULTI_RUN=$HOME/dataDisk/hainan/yangpu/qc/rtabmap_multisession_new
+
+setsid nohup bash $HOME/dataDisk/Study/rtabMap_ws/install_isolated/lib/rtabmap_bringup/run_fastlio_rtabmap_multisession_test.sh \
+  --seed-database "$SEED_DB" --output "$MULTI_RUN/output" \
+  --start 555 --duration 402.058 --warmup 0 --port 11338 \
+  > "$MULTI_RUN/console.log" 2>&1 < /dev/null &
+```
+
+The backend loads all old scans while paused. Playback then starts and the
+helper resumes RTAB-Map only after FAST-LIO publishes a non-zero pose. This
+preserves the old optimized poses for spatial ICP while avoiding the automatic
+identity-odom reset. The dedicated configuration is
+`config/fastlio_rtabmap_multisession.yaml`.
+
+The verified full result, nine inter-session constraints, database checks and
+parameter rationale are in
+[`../docs/mode_b_yangpu_multisession_report.md`](../docs/mode_b_yangpu_multisession_report.md).
+
+### Mode B GPS priors and GPS-aligned multi-session continuation
+
+Add `--gps` to both guarded runners. The first run creates
+`output/gps_origin.json`; the second run requires and copies that file beside
+the seed database so both sessions use exactly the same local GNSS frame.
+
+```bash
+GPS_RUN1=$HOME/dataDisk/hainan/yangpu/qc/rtabmap_gps_session1_new
+GPS_RUN2=$HOME/dataDisk/hainan/yangpu/qc/rtabmap_gps_multisession_new
+
+bash $HOME/dataDisk/Study/rtabMap_ws/install_isolated/lib/rtabmap_bringup/run_fastlio_rtabmap_bag_test.sh \
+  --gps --output "$GPS_RUN1/output" --duration 515 --port 11347
+
+bash $HOME/dataDisk/Study/rtabMap_ws/install_isolated/lib/rtabmap_bringup/run_fastlio_rtabmap_multisession_test.sh \
+  --gps --seed-database "$GPS_RUN1/output/rtabmap.db" \
+  --output "$GPS_RUN2/output" --start 555 --duration 402.058 --port 11348
+```
+
+In the second session, `fastlio_odom_covariance.py` estimates the rigid
+FAST-LIO-to-GNSS-local alignment from synchronized poses and publishes odometry
+in `gps_local_odom`. This gives RTAB-Map a common raw search frame across a
+FAST-LIO restart; GPS remains a position-only graph prior, while LiDAR ICP must
+still validate every loop closure.
+
+Export all optimized map components directly from the database scans:
+
+```bash
+rosrun rtabmap_bringup export_rtabmap_pcd.sh \
+  --database "$GPS_RUN2/output/rtabmap.db" \
+  --output "$GPS_RUN2/pcd_export" --voxel-size 0.25
+```
+
+The exporter opens a temporary database copy read-only, applies saved poses and
+re-optimizes any disconnected component missing from the saved optimized pose
+set. It excludes rehearsal nodes (`weight=-9`), writes binary `PointXYZI` PCD,
+and generates `inspection/pcd_report.json` plus `pcd_topdown.png`. The completed
+GPS two-session run, 41 cross-session closures, GPS-prior coverage, and PCD QA
+are recorded in
+[`../docs/mode_b_yangpu_gps_multisession_report.md`](../docs/mode_b_yangpu_gps_multisession_report.md).
+
+For any other Yangpu collection, select the bag sequence explicitly. A
+multi-session continuation from a different recording starts at zero rather
+than inheriting the historical `555 s` offset:
+
+```bash
+rosrun rtabmap_bringup run_fastlio_rtabmap_bag_test.sh \
+  --gps --bag-dir $HOME/dataDisk/hainan/yangpu/A208 \
+  --bag-pattern '2026-06-08-16-*' --duration 697.730 --output "$GPS_RUN1/output"
+
+rosrun rtabmap_bringup run_fastlio_rtabmap_multisession_test.sh \
+  --gps --bag-dir $HOME/dataDisk/hainan/yangpu/A205 \
+  --bag-pattern '2026-06-09-14-*' --start 0 --duration 932.980 \
+  --seed-database "$GPS_RUN1/output/rtabmap.db" --output "$GPS_RUN2/output"
+```
+
+The complete A208-to-A205 workflow, validation queries, expected results and
+PCD checks are in
+[`../docs/a208_a205_gps_multisession_reproduction.md`](../docs/a208_a205_gps_multisession_reproduction.md).

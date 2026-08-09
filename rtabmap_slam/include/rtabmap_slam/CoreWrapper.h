@@ -274,6 +274,7 @@ private:
 	std::string databasePath_;
 	double odomDefaultAngVariance_;
 	double odomDefaultLinVariance_;
+	bool odomPoseFromMessage_;
 	double landmarkDefaultAngVariance_;
 	double landmarkDefaultLinVariance_;
 	bool waitForTransform_;
@@ -375,6 +376,11 @@ private:
 
 	ros::Subscriber globalPoseAsyncSub_;
 	geometry_msgs::PoseWithCovarianceStamped globalPose_;
+	std::map<double, geometry_msgs::PoseWithCovarianceStamped> globalPoses_;
+	UMutex globalPoseMutex_;
+	double globalPoseTimeTolerance_;
+	int globalPoseQueueSize_;
+	int globalPoseBufferSize_;
 	ros::Subscriber gpsFixAsyncSub_;
 	rtabmap::GPS gps_;
 	ros::Subscriber tagDetectionsSub_;
@@ -421,4 +427,3 @@ private:
 }
 
 #endif /* COREWRAPPER_H_ */
-

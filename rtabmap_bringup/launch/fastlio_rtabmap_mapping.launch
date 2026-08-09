@@ -1,0 +1,163 @@
+<?xml version="1.0"?>
+<launch>
+  <!--
+    Mode B: FAST-LIO remains the LiDAR+IMU front end. This launch intentionally
+    starts only RTAB-Map; it never starts rtabmap_odom/icp_odometry.
+
+    Local FAST-LIO publishes map -> base_link_fast_lio. Use a distinct RTAB-Map
+    root frame so RTAB-Map can publish rtabmap_map -> map without a TF conflict.
+  -->
+  <arg name="use_sim_time" default="true"/>
+
+  <arg name="odom_topic" default="/fast_lio_ns/loc_result"/>
+  <arg name="cloud_topic" default="/fast_lio_ns/cloud_registered_body"/>
+  <arg name="safe_cloud_topic" default="/fast_lio_ns/cloud_registered_body_safe"/>
+  <arg name="safe_cloud_max_range" default="300.0"/>
+  <arg name="base_frame" default="base_link_fast_lio"/>
+  <arg name="fastlio_odom_frame" default="map"/>
+  <arg name="map_frame" default="rtabmap_map"/>
+  <arg name="publish_tf" default="true"/>
+
+  <arg name="output_dir" default="$(env HOME)/dataDisk/hainan/yangpu/qc/rtabmap_fastlio_output"/>
+  <arg name="database_path" default="$(arg output_dir)/rtabmap.db"/>
+  <arg name="delete_db_on_start" default="true"/>
+  <arg name="config_path" default="$(find rtabmap_bringup)/config/fastlio_rtabmap_mapping.yaml"/>
+  <arg name="start_paused" default="false"/>
+  <arg name="rtabmap_args" default=""/>
+
+  <arg name="approx_sync" default="false"/>
+  <arg name="topic_queue_size" default="30"/>
+  <arg name="sync_queue_size" default="100"/>
+  <arg name="rtabmap_detection_rate" default="2.0"/>
+  <arg name="use_odom_covariance_adapter" default="false"/>
+  <arg name="odom_covariance_input_topic" default="/fast_lio_ns/loc_result"/>
+  <arg name="odom_covariance_output_topic" default="/fast_lio_ns/loc_result_rtabmap"/>
+  <arg name="odom_covariance_align_global_pose" default="false"/>
+  <arg name="odom_covariance_aligned_frame_id" default="gps_local_odom"/>
+  <arg name="odom_covariance_publish_delay_sec" default="0.0"/>
+  <arg name="odom_pose_from_message" default="false"/>
+  <arg name="use_global_pose" default="false"/>
+  <arg name="global_pose_input_topic" default="/localization/gnss_odom"/>
+  <arg name="global_pose_topic" default="/rtabmap/global_pose"/>
+  <arg name="global_pose_expected_child_frame" default="base_link"/>
+  <arg name="global_pose_covariance_scale" default="1.0"/>
+  <arg name="global_pose_delay_sec" default="0.0"/>
+  <arg name="global_pose_position_only" default="true"/>
+  <arg name="global_pose_local_origin" default="true"/>
+  <arg name="global_pose_origin_file" default=""/>
+  <arg name="global_pose_time_tolerance" default="0.05"/>
+  <arg name="global_pose_queue_size" default="5000"/>
+  <arg name="global_pose_buffer_size" default="10000"/>
+  <arg name="rviz" default="false"/>
+  <arg name="rviz_config" default="$(find rtabmap_bringup)/rviz/fastlio_mapping.rviz"/>
+
+  <param name="/use_sim_time" value="$(arg use_sim_time)"/>
+  <arg name="delete_db_arg"
+       default="$(eval delete_db_on_start and '--delete_db_on_start' or '')"/>
+
+  <group ns="rtabmap">
+    <node pkg="rtabmap_slam"
+          type="rtabmap"
+          name="rtabmap"
+          required="true"
+          output="screen"
+          args="$(arg delete_db_arg) $(arg rtabmap_args)">
+      <rosparam command="load" file="$(arg config_path)"/>
+
+      <!-- The cloud and odometry are synchronized by their FAST-LIO scan stamp. -->
+      <param name="database_path" type="string" value="$(arg database_path)"/>
+      <param name="frame_id" type="string" value="$(arg base_frame)"/>
+      <param name="map_frame_id" type="string" value="$(arg map_frame)"/>
+      <param name="odom_frame_id" type="string" value=""/>
+      <param name="publish_tf" type="bool" value="$(arg publish_tf)"/>
+      <param name="is_rtabmap_paused" type="bool" value="$(arg start_paused)"/>
+
+      <param name="subscribe_depth" type="bool" value="false"/>
+      <param name="subscribe_rgb" type="bool" value="false"/>
+      <param name="subscribe_rgbd" type="bool" value="false"/>
+      <param name="subscribe_stereo" type="bool" value="false"/>
+      <param name="subscribe_scan" type="bool" value="false"/>
+      <param name="subscribe_scan_cloud" type="bool" value="true"/>
+      <param name="subscribe_scan_descriptor" type="bool" value="false"/>
+      <param name="subscribe_odom" type="bool" value="true"/>
+      <param name="subscribe_odom_info" type="bool" value="false"/>
+
+      <!-- CoreWrapper has an asynchronous imu subscription, so leave /rtabmap/imu
+           unremapped: B1 uses only FAST-LIO odometry and its local body cloud. -->
+      <param name="approx_sync" type="bool" value="$(arg approx_sync)"/>
+      <param name="topic_queue_size" type="int" value="$(arg topic_queue_size)"/>
+      <param name="sync_queue_size" type="int" value="$(arg sync_queue_size)"/>
+      <param name="wait_for_transform_duration" type="double" value="0.2"/>
+      <param name="Rtabmap/DetectionRate" type="double" value="$(arg rtabmap_detection_rate)"/>
+      <param name="global_pose_time_tolerance" type="double" value="$(arg global_pose_time_tolerance)"/>
+      <param name="global_pose_queue_size" type="int" value="$(arg global_pose_queue_size)"/>
+      <param name="global_pose_buffer_size" type="int" value="$(arg global_pose_buffer_size)"/>
+      <param name="odom_pose_from_message" type="bool" value="$(arg odom_pose_from_message)"/>
+
+      <remap from="odom" to="$(arg odom_topic)"/>
+      <remap from="scan_cloud" to="$(arg safe_cloud_topic)"/>
+      <remap from="global_pose" to="$(arg global_pose_topic)"/>
+    </node>
+  </group>
+
+  <!-- FAST-LIO may occasionally publish non-finite/overflow-scale points on
+       this dataset. Strip them before RTAB-Map builds its ICP KD-tree. -->
+  <node pkg="rtabmap_bringup"
+        type="pointcloud_safety_filter"
+        name="pointcloud_safety_filter"
+        output="screen">
+    <param name="input_topic" value="$(arg cloud_topic)"/>
+    <param name="output_topic" value="$(arg safe_cloud_topic)"/>
+    <param name="max_range" value="$(arg safe_cloud_max_range)"/>
+    <param name="min_points" value="20"/>
+  </node>
+
+  <node if="$(arg use_odom_covariance_adapter)"
+        pkg="rtabmap_bringup"
+        type="fastlio_odom_covariance.py"
+        name="fastlio_odom_covariance"
+        output="screen">
+    <param name="input_topic" value="$(arg odom_covariance_input_topic)"/>
+    <param name="output_topic" value="$(arg odom_covariance_output_topic)"/>
+    <param name="linear_stddev" value="0.05"/>
+    <param name="angular_stddev" value="0.0174533"/>
+    <param name="align_to_global_pose" value="$(arg odom_covariance_align_global_pose)"/>
+    <param name="global_pose_topic" value="$(arg global_pose_topic)"/>
+    <param name="aligned_frame_id" value="$(arg odom_covariance_aligned_frame_id)"/>
+    <param name="alignment_tolerance" value="0.05"/>
+    <param name="min_alignment_translation" value="0.05"/>
+    <param name="publish_delay_sec" value="$(arg odom_covariance_publish_delay_sec)"/>
+  </node>
+
+  <!-- RTAB-Map's global_pose header identifies the measured sensor frame, not
+       the global ENU parent frame. This adapter also validates/floors covariance. -->
+  <node if="$(arg use_global_pose)"
+        pkg="rtabmap_bringup"
+        type="gnss_odom_to_global_pose.py"
+        name="gnss_odom_to_global_pose"
+        output="screen">
+    <param name="input_topic" value="$(arg global_pose_input_topic)"/>
+    <param name="output_topic" value="$(arg global_pose_topic)"/>
+    <param name="output_frame_id" value="$(arg base_frame)"/>
+    <param name="expected_child_frame" value="$(arg global_pose_expected_child_frame)"/>
+    <param name="strict_child_frame" value="true"/>
+    <param name="allow_zero_covariance" value="true"/>
+    <param name="diagonalize_covariance" value="true"/>
+    <param name="covariance_scale" value="$(arg global_pose_covariance_scale)"/>
+    <param name="pose_delay_sec" value="$(arg global_pose_delay_sec)"/>
+    <param name="position_only" value="$(arg global_pose_position_only)"/>
+    <param name="local_origin" value="$(arg global_pose_local_origin)"/>
+    <param name="origin_file" value="$(arg global_pose_origin_file)"/>
+    <rosparam param="min_position_stddev">[0.20, 0.20, 0.50]</rosparam>
+    <rosparam param="min_orientation_stddev">[0.0349066, 0.0349066, 0.0174533]</rosparam>
+    <rosparam param="fallback_position_stddev">[2.0, 2.0, 3.0]</rosparam>
+    <rosparam param="fallback_orientation_stddev">[0.35, 0.35, 0.35]</rosparam>
+  </node>
+
+  <node if="$(arg rviz)"
+        pkg="rviz"
+        type="rviz"
+        name="fastlio_rtabmap_rviz"
+        args="-d $(arg rviz_config)"
+        output="screen"/>
+</launch>

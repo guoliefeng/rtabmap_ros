@@ -1,0 +1,55 @@
+# Mode B + GNSS: FAST-LIO odometry, LiDAR loop closures and global pose priors.
+subscribe_depth: false
+subscribe_rgb: false
+subscribe_rgbd: false
+subscribe_stereo: false
+subscribe_scan: false
+subscribe_scan_cloud: true
+subscribe_scan_descriptor: false
+subscribe_odom: true
+subscribe_odom_info: false
+
+publish_tf: true
+approx_sync: false
+topic_queue_size: 30
+sync_queue_size: 100
+wait_for_transform_duration: 0.2
+
+Mem/IncrementalMemory: true
+Mem/InitWMWithAllNodes: false
+Mem/BinDataKept: true
+Mem/ReduceGraph: false
+
+Reg/Strategy: 1
+Reg/Force3DoF: false
+
+# PosePrior links are ignored by default in RTAB-Map. GTSAM is explicitly used
+# here because it supports full 6-DoF global pose priors and their covariance.
+Optimizer/Strategy: 2
+Optimizer/PriorsIgnored: false
+Optimizer/VarianceIgnored: false
+Optimizer/Iterations: 30
+Optimizer/GravitySigma: 0.3
+
+Rtabmap/DetectionRate: 2.0
+Rtabmap/TimeThr: 0
+Rtabmap/MemoryThr: 0
+
+RGBD/LinearUpdate: 0.50
+RGBD/AngularUpdate: 0.087266
+RGBD/ProximityBySpace: true
+RGBD/ProximityByTime: false
+RGBD/ProximityPathMaxNeighbors: 1
+RGBD/OptimizeFromGraphEnd: false
+
+Grid/Sensor: 0
+Grid/RangeMin: 2.0
+Grid/RangeMax: 100.0
+Grid/CellSize: 0.20
+
+Icp/PointToPlane: true
+Icp/PointToPlaneRadius: 0.50
+Icp/Iterations: 30
+Icp/MaxCorrespondenceDistance: 2.0
+Icp/CorrespondenceRatio: 0.10
+Icp/VoxelSize: 0.0
