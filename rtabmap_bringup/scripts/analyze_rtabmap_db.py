@@ -4,6 +4,7 @@
 import argparse
 import collections
 import csv
+import math
 import os
 import re
 import sqlite3
@@ -75,6 +76,93 @@ def trajectory_length(points):
         total += ((second[1] - first[1]) ** 2 + (second[2] - first[2]) ** 2 +
                   (second[3] - first[3]) ** 2) ** 0.5
     return total
+
+
+def quaternion_from_rpy(roll, pitch, yaw):
+    sr, cr = math.sin(roll / 2.0), math.cos(roll / 2.0)
+    sp, cp = math.sin(pitch / 2.0), math.cos(pitch / 2.0)
+    sy, cy = math.sin(yaw / 2.0), math.cos(yaw / 2.0)
+    return (
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
+
+
+def quaternion_from_rotation(values):
+    """Return an xyzw quaternion from a row-major 3x3 rotation matrix."""
+    m00, m01, m02, m10, m11, m12, m20, m21, m22 = values
+    trace = m00 + m11 + m22
+    if trace > 0.0:
+        scale = math.sqrt(trace + 1.0) * 2.0
+        quaternion = ((m21 - m12) / scale, (m02 - m20) / scale,
+                      (m10 - m01) / scale, 0.25 * scale)
+    elif m00 > m11 and m00 > m22:
+        scale = math.sqrt(max(0.0, 1.0 + m00 - m11 - m22)) * 2.0
+        quaternion = (0.25 * scale, (m01 + m10) / scale,
+                      (m02 + m20) / scale, (m21 - m12) / scale)
+    elif m11 > m22:
+        scale = math.sqrt(max(0.0, 1.0 + m11 - m00 - m22)) * 2.0
+        quaternion = ((m01 + m10) / scale, 0.25 * scale,
+                      (m12 + m21) / scale, (m02 - m20) / scale)
+    else:
+        scale = math.sqrt(max(0.0, 1.0 + m22 - m00 - m11)) * 2.0
+        quaternion = ((m02 + m20) / scale, (m12 + m21) / scale,
+                      0.25 * scale, (m10 - m01) / scale)
+    norm = math.sqrt(sum(value * value for value in quaternion))
+    if norm < 1.0e-9 or not math.isfinite(norm):
+        return None
+    return tuple(value / norm for value in quaternion)
+
+
+def uncompress_matrix(blob, scalar_format, expected_type):
+    """Decode a compressData2() blob from RTAB-Map's Admin table."""
+    if not blob or len(blob) < 12:
+        return []
+    rows, columns, matrix_type = struct.unpack("<iii", blob[-12:])
+    if rows <= 0 or columns <= 0 or matrix_type != expected_type:
+        return []
+    try:
+        payload = zlib.decompress(blob[:-12])
+    except zlib.error:
+        return []
+    scalar_size = struct.calcsize(scalar_format)
+    if len(payload) != rows * columns * scalar_size:
+        return []
+    return struct.unpack("<%d%s" % (rows * columns, scalar_format), payload)
+
+
+def load_saved_optimized_poses(cursor, node_stamps):
+    row = cursor.execute("select opt_ids, opt_poses from Admin limit 1").fetchone()
+    if not row:
+        return []
+    # Persisted OpenCV scalar types: CV_32SC1=4 and CV_32FC1=5.
+    identifiers = uncompress_matrix(row[0], "i", 4)
+    transforms = uncompress_matrix(row[1], "f", 5)
+    if not identifiers or len(transforms) != len(identifiers) * 12:
+        return []
+    result = []
+    for index, node_id in enumerate(identifiers):
+        stamp = node_stamps.get(node_id)
+        if stamp is None:
+            continue
+        transform = transforms[index * 12:(index + 1) * 12]
+        quaternion = quaternion_from_rotation((
+            transform[0], transform[1], transform[2],
+            transform[4], transform[5], transform[6],
+            transform[8], transform[9], transform[10]))
+        if quaternion is not None:
+            result.append((float(stamp), transform[3], transform[7], transform[11],
+                           quaternion[0], quaternion[1], quaternion[2], quaternion[3]))
+    return result
+
+
+def save_trajectory_csv(path, points):
+    with open(path, "w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(("timestamp", "x", "y", "z", "qx", "qy", "qz", "qw"))
+        writer.writerows(points)
 
 
 def load_fastlio_trajectory(path):
@@ -191,6 +279,8 @@ def main():
     # node in the graph used for localization, optimization, or map export.
     node_rows = cursor.execute(
         "select id, map_id, stamp, pose from Node where weight > -9 order by id").fetchall()
+    node_stamps = {node_id: stamp for node_id, _, stamp, _ in node_rows
+                   if stamp is not None}
     raw_points = []
     map_ids = []
     for node_id, map_id, stamp, pose in node_rows:
@@ -242,6 +332,7 @@ def main():
     largest_component = max((len(component) for component in components), default=0)
 
     optimized_points = []
+    statistics_optimized_poses = []
     for node_id, stamp, data in cursor.execute(
             "select s.id, s.stamp, s.data from Statistics s join Node n on n.id=s.id "
             "where n.weight > -9 order by s.id"):
@@ -249,6 +340,23 @@ def main():
         keys = ("Loop/MapToBase_x/m", "Loop/MapToBase_y/m", "Loop/MapToBase_z/m")
         if stamp is not None and all(key in values for key in keys):
             optimized_points.append((float(stamp), values[keys[0]], values[keys[1]], values[keys[2]]))
+            angle_keys = ("Loop/MapToBase_roll/deg", "Loop/MapToBase_pitch/deg",
+                          "Loop/MapToBase_yaw/deg")
+            if all(key in values for key in angle_keys):
+                quaternion = quaternion_from_rpy(*[
+                    math.radians(values[key]) for key in angle_keys])
+                statistics_optimized_poses.append((
+                    float(stamp), values[keys[0]], values[keys[1]], values[keys[2]],
+                    quaternion[0], quaternion[1], quaternion[2], quaternion[3]))
+
+    saved_optimized_poses = load_saved_optimized_poses(cursor, node_stamps)
+    optimized_source = "Statistics MapToBase"
+    if saved_optimized_poses:
+        optimized_poses = saved_optimized_poses
+        optimized_points = [pose[:4] for pose in saved_optimized_poses]
+        optimized_source = "Admin final optimized poses"
+    else:
+        optimized_poses = statistics_optimized_poses
 
     table_counts = {}
     for table in ("Node", "Data", "Link", "Feature", "Word", "GlobalDescriptor", "Statistics"):
@@ -259,6 +367,8 @@ def main():
     connection.close()
 
     fastlio_points = load_fastlio_trajectory(args.fastlio_trajectory)
+    save_trajectory_csv(os.path.join(output_dir, "rtabmap_optimized.csv"),
+                        optimized_poses)
     messages = save_plots(output_dir, raw_points, optimized_points, map_ids, fastlio_points)
     report_lines = [
         "# RTAB-Map database report",
@@ -306,7 +416,7 @@ def main():
                  LINK_TYPES.get(link_type, "Unknown"), link_type, transform_text))
     report_lines.extend(["", "## Trajectories"])
     for label, points in (("RTAB-Map raw odometry", raw_points),
-                          ("RTAB-Map optimized (Statistics MapToBase)", optimized_points),
+                          ("RTAB-Map optimized (%s)" % optimized_source, optimized_points),
                           ("FAST-LIO raw odometry", fastlio_points)):
         bounds = extent(points)
         if bounds:
@@ -317,7 +427,7 @@ def main():
     report_lines.extend(["", "## Generated files"])
     for name in ("trajectory_xy.png", "trajectory_z.png", "map_id_timeline.png",
                  "fastlio_xy.png", "rtabmap_xy.png", "fastlio_vs_rtabmap_xy.png",
-                 "fastlio_vs_rtabmap_z.png"):
+                 "fastlio_vs_rtabmap_z.png", "rtabmap_optimized.csv"):
         if os.path.isfile(os.path.join(output_dir, name)):
             report_lines.append("- %s" % name)
     report_lines.extend(messages)

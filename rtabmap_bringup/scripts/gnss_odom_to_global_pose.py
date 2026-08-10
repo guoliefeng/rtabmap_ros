@@ -9,6 +9,8 @@ import tempfile
 from collections import deque
 
 import rospy
+import tf2_ros
+import yaml
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 
@@ -26,7 +28,19 @@ class GnssOdomToGlobalPose:
         self.pose_delay_sec = float(rospy.get_param("~pose_delay_sec", 3.0))
         self.position_only = bool(rospy.get_param("~position_only", True))
         self.local_origin = bool(rospy.get_param("~local_origin", False))
+        self.local_origin_mode = str(
+            rospy.get_param("~local_origin_mode", "se3")).strip().lower()
         self.origin_file = str(rospy.get_param("~origin_file", ""))
+        self.use_alignment_time_offset = bool(
+            rospy.get_param("~use_alignment_time_offset", False))
+        self.output_stamp_offset_sec = float(
+            rospy.get_param("~output_stamp_offset_sec", 0.0))
+        self.apply_pose_reference_extrinsic = bool(
+            rospy.get_param("~apply_pose_reference_extrinsic", False))
+        self.body_reference_frame = str(
+            rospy.get_param("~body_reference_frame", "base_link"))
+        self.pose_reference_frame = str(
+            rospy.get_param("~pose_reference_frame", "ins"))
         self.min_position_stddev = self._vector_param(
             "~min_position_stddev", [0.20, 0.20, 0.50])
         self.min_orientation_stddev = self._vector_param(
@@ -45,11 +59,27 @@ class GnssOdomToGlobalPose:
             raise ValueError("max_position_stddev must be finite and positive")
         if not math.isfinite(self.pose_delay_sec) or self.pose_delay_sec < 0.0:
             raise ValueError("pose_delay_sec must be finite and non-negative")
+        if not math.isfinite(self.output_stamp_offset_sec):
+            raise ValueError("output_stamp_offset_sec must be finite")
+        if self.local_origin_mode not in ("se3", "translation_only"):
+            raise ValueError("local_origin_mode must be 'se3' or 'translation_only'")
+        if (self.apply_pose_reference_extrinsic and
+                (not self.body_reference_frame or not self.pose_reference_frame)):
+            raise ValueError(
+                "body_reference_frame and pose_reference_frame must be non-empty "
+                "when pose-reference compensation is enabled")
 
         self.received = 0
         self.published = 0
         self.fallback_covariance_count = 0
         self.pending = deque()
+        self.pose_reference_extrinsic = None
+        self.origin_in_pose_reference = False
+        self.tf_buffer = None
+        self.tf_listener = None
+        if self.apply_pose_reference_extrinsic:
+            self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(30.0))
+            self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
         self.origin = self._load_origin() if self.local_origin and self.origin_file else None
         self.publisher = rospy.Publisher(
             self.output_topic, PoseWithCovarianceStamped, queue_size=20)
@@ -58,7 +88,8 @@ class GnssOdomToGlobalPose:
         rospy.loginfo(
             "GNSS global-pose adapter: %s -> %s, RTAB sensor frame='%s', "
             "expected child='%s', covariance floors position=%s m orientation=%s rad, "
-            "position_only=%s, local_origin=%s, origin_file='%s', delay=%.3f s",
+            "position_only=%s, local_origin=%s (%s), origin_file='%s', delay=%.3f s, "
+            "pose_reference_compensation=%s (%s <- %s), output_stamp_offset=%.3f s",
             self.input_topic,
             self.output_topic,
             self.output_frame_id,
@@ -67,8 +98,13 @@ class GnssOdomToGlobalPose:
             self.min_orientation_stddev,
             self.position_only,
             self.local_origin,
+            self.local_origin_mode,
             self.origin_file,
             self.pose_delay_sec,
+            self.apply_pose_reference_extrinsic,
+            self.body_reference_frame,
+            self.pose_reference_frame,
+            self.output_stamp_offset_sec,
         )
 
     @staticmethod
@@ -122,15 +158,37 @@ class GnssOdomToGlobalPose:
         if not os.path.exists(self.origin_file):
             return None
         with open(self.origin_file, "r", encoding="utf-8") as stream:
-            document = json.load(stream)
-        position = document.get("position")
+            document = yaml.safe_load(stream)
+        if not isinstance(document, dict):
+            raise ValueError("origin file must contain a mapping")
+        alignment_origin = document.get("ins_translation_origin")
+        if isinstance(alignment_origin, dict):
+            position = [alignment_origin.get(axis) for axis in ("x", "y", "z")]
+            orientation_document = alignment_origin.get("orientation")
+            if not isinstance(orientation_document, dict):
+                raise ValueError("alignment INS origin must contain orientation")
+            orientation_values = [orientation_document.get(axis)
+                                  for axis in ("x", "y", "z", "w")]
+            self.origin_in_pose_reference = True
+            if self.use_alignment_time_offset:
+                alignment_offset = float(document.get("time_offset_sec"))
+                if not math.isfinite(alignment_offset):
+                    raise ValueError("alignment time_offset_sec must be finite")
+                # Alignment convention: INS time = FAST-LIO time + offset.
+                # Therefore an INS sample corresponds to output/FAST-LIO time
+                # INS time - offset.
+                self.output_stamp_offset_sec = -alignment_offset
+        else:
+            position = document.get("position")
+            orientation_values = document.get("orientation")
         if not isinstance(position, list) or len(position) != 3:
             raise ValueError("origin position must have three elements")
         position = tuple(float(value) for value in position)
         if any(not math.isfinite(value) for value in position):
             raise ValueError("origin position contains a non-finite value")
-        orientation = self._normalize_quaternion_values(document.get("orientation"))
-        rospy.loginfo("Loaded GNSS local origin from %s", self.origin_file)
+        orientation = self._normalize_quaternion_values(orientation_values)
+        rospy.loginfo("Loaded local origin from %s (pose_reference=%s)",
+                      self.origin_file, self.origin_in_pose_reference)
         return position, orientation
 
     def _save_origin(self, message, position, orientation):
@@ -223,10 +281,15 @@ class GnssOdomToGlobalPose:
             self.origin = (source_position, source_orientation)
             self._save_origin(message, source_position, source_orientation)
         origin_position, origin_orientation = self.origin
-        inverse_orientation = self._quaternion_conjugate(origin_orientation)
-        rotation = self._rotation_matrix(inverse_orientation)
         delta = tuple(source_position[index] - origin_position[index]
                       for index in range(3))
+        if self.local_origin_mode == "translation_only":
+            # Preserve the global/ENU axis directions. In particular, do not
+            # rotate positions by the inverse first-pose vehicle attitude.
+            pose.position.x, pose.position.y, pose.position.z = delta
+            return None
+        inverse_orientation = self._quaternion_conjugate(origin_orientation)
+        rotation = self._rotation_matrix(inverse_orientation)
         local_position = self._matrix_vector(rotation, delta)
         local_orientation = self._normalize_quaternion_values(
             self._quaternion_multiply(inverse_orientation, source_orientation))
@@ -234,6 +297,87 @@ class GnssOdomToGlobalPose:
         (pose.orientation.x, pose.orientation.y,
          pose.orientation.z, pose.orientation.w) = local_orientation
         return rotation
+
+    def _get_pose_reference_extrinsic(self):
+        if not self.apply_pose_reference_extrinsic:
+            return None
+        if self.pose_reference_extrinsic is not None:
+            return self.pose_reference_extrinsic
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.body_reference_frame,
+                self.pose_reference_frame,
+                rospy.Time(0),
+                rospy.Duration(0.0),
+            ).transform
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException) as error:
+            rospy.logwarn_throttle(
+                5.0, "Waiting for pose-reference TF %s <- %s: %s",
+                self.body_reference_frame, self.pose_reference_frame, error)
+            return None
+        translation = (
+            float(transform.translation.x),
+            float(transform.translation.y),
+            float(transform.translation.z),
+        )
+        orientation = self._normalize_quaternion_values((
+            transform.rotation.x,
+            transform.rotation.y,
+            transform.rotation.z,
+            transform.rotation.w,
+        ))
+        if any(not math.isfinite(value) for value in translation):
+            rospy.logerr("Pose-reference TF has a non-finite translation")
+            return None
+        self.pose_reference_extrinsic = translation, orientation
+        rospy.loginfo(
+            "Cached pose-reference TF %s <- %s: translation=%s",
+            self.body_reference_frame, self.pose_reference_frame, translation)
+        return self.pose_reference_extrinsic
+
+    def _pose_reference_to_body(self, pose):
+        """Convert T_world_reference to T_world_body using T_body_reference."""
+        extrinsic = self._get_pose_reference_extrinsic()
+        if self.apply_pose_reference_extrinsic and extrinsic is None:
+            return False
+        if extrinsic is None:
+            return True
+        translation_body_reference, orientation_body_reference = extrinsic
+        if self.origin is not None and self.origin_in_pose_reference:
+            self.origin = self._reference_pose_to_body_values(
+                self.origin[0], self.origin[1],
+                translation_body_reference, orientation_body_reference)
+            self.origin_in_pose_reference = False
+            rospy.loginfo("Converted loaded INS origin to %s with static extrinsic",
+                          self.body_reference_frame)
+        position_world_reference = (
+            pose.position.x, pose.position.y, pose.position.z)
+        orientation_world_reference = (
+            pose.orientation.x, pose.orientation.y,
+            pose.orientation.z, pose.orientation.w)
+        position_world_body, orientation_world_body = self._reference_pose_to_body_values(
+            position_world_reference, orientation_world_reference,
+            translation_body_reference, orientation_body_reference)
+        pose.position.x, pose.position.y, pose.position.z = position_world_body
+        (pose.orientation.x, pose.orientation.y,
+         pose.orientation.z, pose.orientation.w) = orientation_world_body
+        return True
+
+    def _reference_pose_to_body_values(
+            self, position_world_reference, orientation_world_reference,
+            translation_body_reference, orientation_body_reference):
+        orientation_world_body = self._normalize_quaternion_values(
+            self._quaternion_multiply(
+                orientation_world_reference,
+                self._quaternion_conjugate(orientation_body_reference)))
+        rotation_world_body = self._rotation_matrix(orientation_world_body)
+        lever_world = self._matrix_vector(
+            rotation_world_body, translation_body_reference)
+        position_world_body = tuple(
+            position_world_reference[index] - lever_world[index]
+            for index in range(3))
+        return position_world_body, orientation_world_body
 
     def _covariance(self, source, rotation=None):
         source = list(source)
@@ -293,7 +437,9 @@ class GnssOdomToGlobalPose:
             return
 
         output = PoseWithCovarianceStamped()
-        output.header.stamp = message.header.stamp
+        output.header.stamp = (
+            message.header.stamp +
+            rospy.Duration.from_sec(self.output_stamp_offset_sec))
         # CoreWrapper uses this field as the measured sensor/body frame when it
         # converts the global pose to frame_id. It is intentionally not the ENU
         # world frame from Odometry.header.frame_id.
@@ -302,6 +448,8 @@ class GnssOdomToGlobalPose:
         if not self._normalize_quaternion(output.pose.pose):
             rospy.logwarn_throttle(5.0, "Dropping GNSS pose with invalid quaternion")
             return
+        if not self._pose_reference_to_body(output.pose.pose):
+            return
         rotation = self._to_local_pose(message, output.pose.pose)
         covariance = self._covariance(message.pose.covariance, rotation)
         if covariance is None:
@@ -309,7 +457,7 @@ class GnssOdomToGlobalPose:
             return
         output.pose.covariance = covariance
         self.pending.append(output)
-        cutoff = message.header.stamp - rospy.Duration.from_sec(self.pose_delay_sec)
+        cutoff = output.header.stamp - rospy.Duration.from_sec(self.pose_delay_sec)
         while self.pending and self.pending[0].header.stamp <= cutoff:
             self.publisher.publish(self.pending.popleft())
             self.published += 1

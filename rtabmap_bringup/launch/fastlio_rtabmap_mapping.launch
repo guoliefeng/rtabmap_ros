@@ -44,7 +44,13 @@
   <arg name="global_pose_delay_sec" default="0.0"/>
   <arg name="global_pose_position_only" default="true"/>
   <arg name="global_pose_local_origin" default="true"/>
+  <arg name="global_pose_local_origin_mode" default="se3"/>
   <arg name="global_pose_origin_file" default=""/>
+  <arg name="global_pose_use_alignment_time_offset" default="false"/>
+  <arg name="global_pose_output_stamp_offset_sec" default="0.0"/>
+  <arg name="global_pose_apply_reference_extrinsic" default="false"/>
+  <arg name="global_pose_body_reference_frame" default="base_link"/>
+  <arg name="global_pose_pose_reference_frame" default="ins"/>
   <arg name="global_pose_time_tolerance" default="0.05"/>
   <arg name="global_pose_queue_size" default="5000"/>
   <arg name="global_pose_buffer_size" default="10000"/>
@@ -147,7 +153,16 @@
     <param name="pose_delay_sec" value="$(arg global_pose_delay_sec)"/>
     <param name="position_only" value="$(arg global_pose_position_only)"/>
     <param name="local_origin" value="$(arg global_pose_local_origin)"/>
+    <param name="local_origin_mode" value="$(arg global_pose_local_origin_mode)"/>
     <param name="origin_file" value="$(arg global_pose_origin_file)"/>
+    <param name="use_alignment_time_offset"
+           value="$(arg global_pose_use_alignment_time_offset)"/>
+    <param name="output_stamp_offset_sec"
+           value="$(arg global_pose_output_stamp_offset_sec)"/>
+    <param name="apply_pose_reference_extrinsic"
+           value="$(arg global_pose_apply_reference_extrinsic)"/>
+    <param name="body_reference_frame" value="$(arg global_pose_body_reference_frame)"/>
+    <param name="pose_reference_frame" value="$(arg global_pose_pose_reference_frame)"/>
     <rosparam param="min_position_stddev">[0.20, 0.20, 0.50]</rosparam>
     <rosparam param="min_orientation_stddev">[0.0349066, 0.0349066, 0.0174533]</rosparam>
     <rosparam param="fallback_position_stddev">[2.0, 2.0, 3.0]</rosparam>

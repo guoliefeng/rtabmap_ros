@@ -45,6 +45,9 @@ Grid/CellSize: 0.20
 Icp/PointToPlane: true
 # Non-zero radius is required to estimate local normals from this cloud for
 # point-to-plane graph registration. This is not a FAST-LIO odometry setting.
+# PCL rejects a normal search when both K and radius are non-zero. RTAB-Map's
+# default K is 5, so explicitly disable it when the radius search is selected.
+Icp/PointToPlaneK: 0
 Icp/PointToPlaneRadius: 0.50
 Icp/Iterations: 30
 Icp/MaxCorrespondenceDistance: 2.0

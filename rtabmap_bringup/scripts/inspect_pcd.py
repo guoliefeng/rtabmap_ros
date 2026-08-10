@@ -88,6 +88,7 @@ def main():
     parser.add_argument("pcd")
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--max-plot-points", type=int, default=750000)
+    parser.add_argument("--title", default="RTAB-Map cloud (top view)")
     args = parser.parse_args()
 
     path = os.path.abspath(args.pcd)
@@ -138,7 +139,7 @@ def main():
         axis.set_aspect("equal", adjustable="box")
         axis.set_xlabel("X (m)")
         axis.set_ylabel("Y (m)")
-        axis.set_title("Yangpu GPS multi-session cloud (top view)")
+        axis.set_title(args.title)
         axis.grid(True, linewidth=0.2)
         figure.colorbar(points, ax=axis, label="Z (m)")
         figure.tight_layout()

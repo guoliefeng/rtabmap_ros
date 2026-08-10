@@ -7,10 +7,13 @@ DATABASE=""
 EXPORT_DIR=""
 ROS_PORT="${ROS_PORT:-11450}"
 VOXEL_SIZE="${VOXEL_SIZE:-0.25}"
+PCD_FILENAME="${PCD_FILENAME:-yangpu_gps_multisession.pcd}"
+PLOT_TITLE="${PLOT_TITLE:-Yangpu RTAB-Map cloud (top view)}"
 
 usage() {
     cat <<'EOF'
-Usage: export_rtabmap_pcd.sh --database FILE --output DIR [--voxel-size M] [--port PORT]
+Usage: export_rtabmap_pcd.sh --database FILE --output DIR [--voxel-size M]
+       [--filename NAME.pcd] [--plot-title TITLE] [--port PORT]
 
 Loads the database read-only, decompresses the retained LiDAR scans, transforms
 all graph components with optimized poses, and writes one voxelized binary PCD.
@@ -22,6 +25,8 @@ while [[ $# -gt 0 ]]; do
         --database) DATABASE="$2"; shift 2 ;;
         --output) EXPORT_DIR="$2"; shift 2 ;;
         --voxel-size) VOXEL_SIZE="$2"; shift 2 ;;
+        --filename) PCD_FILENAME="$2"; shift 2 ;;
+        --plot-title) PLOT_TITLE="$2"; shift 2 ;;
         --port) ROS_PORT="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -34,8 +39,12 @@ if [[ -z "${DATABASE}" || -z "${EXPORT_DIR}" || ! -f "${DATABASE}" ||
     usage >&2
     exit 2
 fi
+if [[ "${PCD_FILENAME}" == */* || "${PCD_FILENAME}" != *.pcd ]]; then
+    echo "--filename must be a basename ending in .pcd" >&2
+    exit 2
+fi
 
-FINAL_PCD="${EXPORT_DIR}/yangpu_gps_multisession.pcd"
+FINAL_PCD="${EXPORT_DIR}/${PCD_FILENAME}"
 if [[ -e "${FINAL_PCD}" ]]; then
     echo "Refusing to overwrite existing PCD: ${FINAL_PCD}" >&2
     exit 2
@@ -60,7 +69,7 @@ trap cleanup EXIT INT TERM
     --voxel-size "${VOXEL_SIZE}" --range-min 2.0 --range-max 100.0 \
     > "${EXPORT_DIR}/database_to_pcd.log" 2>&1
 python3 "${RTABMAP_WS}/install_isolated/lib/rtabmap_bringup/inspect_pcd.py" \
-    "${FINAL_PCD}" --output-dir "${EXPORT_DIR}/inspection" \
+    "${FINAL_PCD}" --output-dir "${EXPORT_DIR}/inspection" --title "${PLOT_TITLE}" \
     > "${EXPORT_DIR}/inspection.log" 2>&1
 printf 'database=%s\npcd=%s\nvoxel_size_m=%s\nfinished=%s\n' \
     "${DATABASE}" "${FINAL_PCD}" "${VOXEL_SIZE}" "$(date -Is)" \

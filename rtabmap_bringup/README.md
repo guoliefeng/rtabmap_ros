@@ -331,3 +331,13 @@ rosrun rtabmap_bringup run_fastlio_rtabmap_multisession_test.sh \
 The complete A208-to-A205 workflow, validation queries, expected results and
 PCD checks are in
 [`../docs/a208_a205_gps_multisession_reproduction.md`](../docs/a208_a205_gps_multisession_reproduction.md).
+
+### FAST-LIO rigid alignment to `/localization/ins`
+
+The verified coordinate-first workflow is documented in
+[`../docs/fastlio_ins_alignment_reproduction.md`](../docs/fastlio_ins_alignment_reproduction.md).
+It first estimates the fixed FAST-LIO-to-INS-local SE(2)+Z transform and the
+time offset, then runs RTAB-Map without priors, and only after that enables
+translation-only, position-only INS priors. The adapter uses the recorded
+`base_link <- ins` static transform; `map_harbor` is never treated as a body
+frame alias.

@@ -1,4 +1,5 @@
-# Mode B + GNSS: FAST-LIO odometry, LiDAR loop closures and global pose priors.
+# Mode B with translation-only, position-only INS priors. FAST-LIO remains the
+# sole odometry estimator and RTAB-Map IMU input remains disabled.
 subscribe_depth: false
 subscribe_rgb: false
 subscribe_rgbd: false
@@ -23,13 +24,13 @@ Mem/ReduceGraph: false
 Reg/Strategy: 1
 Reg/Force3DoF: false
 
-# PosePrior links are ignored by default in RTAB-Map. GTSAM is explicitly used
-# here because it supports full 6-DoF global pose priors and their covariance.
+# Pose Prior links are ignored by default. GTSAM supports position-only 3D
+# priors with covariance; angular covariance >=9999 leaves attitude free.
 Optimizer/Strategy: 2
 Optimizer/PriorsIgnored: false
 Optimizer/VarianceIgnored: false
 Optimizer/Iterations: 30
-Optimizer/GravitySigma: 0.3
+Optimizer/GravitySigma: 0.0
 
 Rtabmap/DetectionRate: 2.0
 Rtabmap/TimeThr: 0

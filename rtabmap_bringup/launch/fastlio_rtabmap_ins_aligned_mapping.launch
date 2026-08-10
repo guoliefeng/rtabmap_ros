@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<launch>
+  <!--
+    Coordinate-diagnostic Mode B variant. FAST-LIO's arbitrary local map pose
+    is transformed by a calibrated fixed yaw+translation into ins_local_odom.
+    Global pose priors and RTAB-Map IMU are disabled by default. The optional
+    INS mode uses translation-only local origin and position-only priors.
+  -->
+  <arg name="use_sim_time" default="true"/>
+  <arg name="alignment_file"/>
+  <arg name="raw_odom_topic" default="/fast_lio_ns/loc_result"/>
+  <arg name="aligned_odom_topic" default="/fast_lio_ns/loc_result_ins_aligned"/>
+  <arg name="cloud_topic" default="/fast_lio_ns/cloud_registered_body"/>
+  <arg name="base_frame" default="base_link_fast_lio"/>
+  <arg name="aligned_odom_frame" default="ins_local_odom"/>
+  <arg name="map_frame" default="rtabmap_ins_map"/>
+  <arg name="output_dir"/>
+  <arg name="delete_db_on_start" default="false"/>
+  <arg name="config_path"
+       default="$(find rtabmap_bringup)/config/fastlio_rtabmap_mapping.yaml"/>
+  <arg name="rviz" default="false"/>
+  <arg name="use_ins_position_prior" default="false"/>
+  <arg name="ins_topic" default="/localization/ins"/>
+  <arg name="ins_expected_child_frame" default="map_harbor"/>
+  <arg name="ins_origin_file" default=""/>
+
+  <node pkg="rtabmap_bringup"
+        type="fastlio_ins_alignment.py"
+        name="fastlio_ins_alignment"
+        required="true"
+        output="screen">
+    <param name="input_topic" value="$(arg raw_odom_topic)"/>
+    <param name="output_topic" value="$(arg aligned_odom_topic)"/>
+    <param name="alignment_file" value="$(arg alignment_file)"/>
+    <param name="expected_input_frame" value="map"/>
+    <param name="expected_child_frame" value="$(arg base_frame)"/>
+    <param name="strict_frames" value="true"/>
+    <param name="linear_stddev" value="0.05"/>
+    <param name="angular_stddev" value="0.0174533"/>
+  </node>
+
+  <include file="$(find rtabmap_bringup)/launch/fastlio_rtabmap_mapping.launch">
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="odom_topic" value="$(arg aligned_odom_topic)"/>
+    <arg name="cloud_topic" value="$(arg cloud_topic)"/>
+    <arg name="base_frame" value="$(arg base_frame)"/>
+    <arg name="fastlio_odom_frame" value="$(arg aligned_odom_frame)"/>
+    <arg name="map_frame" value="$(arg map_frame)"/>
+    <arg name="output_dir" value="$(arg output_dir)"/>
+    <arg name="delete_db_on_start" value="$(arg delete_db_on_start)"/>
+    <arg name="config_path" value="$(arg config_path)"/>
+    <arg name="odom_pose_from_message" value="true"/>
+    <arg name="use_odom_covariance_adapter" value="false"/>
+    <arg name="use_global_pose" value="$(arg use_ins_position_prior)"/>
+    <arg name="global_pose_input_topic" value="$(arg ins_topic)"/>
+    <arg name="global_pose_expected_child_frame" value="$(arg ins_expected_child_frame)"/>
+    <arg name="global_pose_position_only" value="true"/>
+    <arg name="global_pose_local_origin" value="true"/>
+    <arg name="global_pose_local_origin_mode" value="translation_only"/>
+    <arg name="global_pose_origin_file" value="$(arg ins_origin_file)"/>
+    <arg name="global_pose_use_alignment_time_offset" value="true"/>
+    <arg name="global_pose_apply_reference_extrinsic" value="true"/>
+    <arg name="global_pose_body_reference_frame" value="base_link"/>
+    <arg name="global_pose_pose_reference_frame" value="ins"/>
+    <arg name="rviz" value="$(arg rviz)"/>
+  </include>
+</launch>

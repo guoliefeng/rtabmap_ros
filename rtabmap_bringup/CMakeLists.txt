@@ -37,6 +37,12 @@ install(PROGRAMS
   scripts/inspect_pcd.py
   scripts/fastlio_odom_covariance.py
   scripts/gnss_odom_to_global_pose.py
+  scripts/collect_fastlio_ins_trajectory.py
+  scripts/estimate_fastlio_ins_alignment.py
+  scripts/fastlio_ins_alignment.py
+  scripts/evaluate_ins_alignment.py
+  scripts/run_fastlio_ins_alignment_diagnostic.sh
+  scripts/run_fastlio_rtabmap_ins_aligned_test.sh
   scripts/run_fastlio_frontend_mode_b.sh
   scripts/run_fastlio_rtabmap_bag_test.sh
   scripts/run_fastlio_rtabmap_multisession_test.sh
